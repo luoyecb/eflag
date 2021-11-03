@@ -12,6 +12,8 @@ import (
 
 var (
 	defaultStructTagName = "eflag"
+	defaultItemSep       = "@" // for slice,map: item1@item2@item3
+	defaultMapSep        = "=" // for map: key1=value1@key2=value2
 	defaultFlagSet       = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 
 	ErrUnsupportedType = errors.New("Unsupported type")
@@ -22,6 +24,18 @@ var (
 func SetTagName(s string) {
 	if s != "" {
 		defaultStructTagName = s
+	}
+}
+
+func SetItemSep(s string) {
+	if s != "" {
+		defaultItemSep = s
+	}
+}
+
+func SetMapSep(s string) {
+	if s != "" {
+		defaultMapSep = s
 	}
 }
 
@@ -46,29 +60,136 @@ func (v *Value) String() string {
 }
 
 func (v *Value) Set(dval string) error {
-	// It should be checked first
+	// Check time.Duration first
 	if _, ok := v.rval.Interface().(time.Duration); ok {
 		v.rval.SetInt(int64(ParseDuration(dval, 0)))
 		return nil
 	}
 
-	switch kind := v.rval.Kind(); kind {
-	case reflect.Bool:
-		v.rval.SetBool(ParseBool(dval, false))
-	case reflect.String:
-		v.rval.SetString(dval)
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		v.rval.SetInt(ParseInt(dval, ParseBitSize(kind), 0))
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		v.rval.SetUint(ParseUint(dval, ParseBitSize(kind), 0))
-	case reflect.Float32, reflect.Float64:
-		v.rval.SetFloat(ParseFloat(dval, ParseBitSize(kind), float64(0)))
-	default:
-		return ErrUnsupportedType
+	val, err := ParseValue(v.rval.Type(), dval)
+	if err != nil {
+		return err
 	}
-
+	v.rval.Set(val)
 	v.val = dval
 	return nil
+}
+
+func IsInt(kind reflect.Kind) bool {
+	switch kind {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return true
+	default:
+		return false
+	}
+}
+
+func IsUint(kind reflect.Kind) bool {
+	switch kind {
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return true
+	default:
+		return false
+	}
+}
+
+func IsFloat(kind reflect.Kind) bool {
+	switch kind {
+	case reflect.Float32, reflect.Float64:
+		return true
+	default:
+		return false
+	}
+}
+
+func ParseValue(typ reflect.Type, strval string) (reflect.Value, error) {
+	var val reflect.Value
+	var kind = typ.Kind()
+	items := strings.Split(strval, defaultItemSep)
+
+	if kind == reflect.Map {
+		kt, vt := typ.Key(), typ.Elem()
+		kkind, vkind := kt.Kind(), vt.Kind()
+		rmap := reflect.MakeMap(reflect.MapOf(kt, vt))
+		for _, item := range items {
+			strs := strings.Split(item, defaultMapSep)
+			if len(strs) >= 2 {
+				kval, err := ParseAtomValue(kkind, strs[0])
+				if err != nil {
+					return val, err
+				}
+				vval, err := ParseAtomValue(vkind, strs[1])
+				if err != nil {
+					return val, err
+				}
+				rmap.SetMapIndex(kval, vval)
+			}
+		}
+		return rmap, nil
+	} else if kind == reflect.Slice {
+		rt := typ.Elem()
+		skind := rt.Kind()
+		slice := reflect.MakeSlice(reflect.SliceOf(rt), 0, len(items))
+		for _, item := range items {
+			if sval, err := ParseAtomValue(skind, item); err != nil {
+				return val, err
+			} else {
+				slice = reflect.Append(slice, sval)
+			}
+		}
+		return slice, nil
+	}
+	return ParseAtomValue(kind, strval)
+}
+
+func ParseAtomValue(kind reflect.Kind, strval string) (reflect.Value, error) {
+	var iv int64
+	var uv uint64
+	var fv float64
+	var val reflect.Value
+
+	switch {
+	case IsInt(kind):
+		iv = ParseInt(strval, ParseBitSize(kind), 0)
+	case IsUint(kind):
+		uv = ParseUint(strval, ParseBitSize(kind), 0)
+	case IsFloat(kind):
+		fv = ParseFloat(strval, ParseBitSize(kind), float64(0))
+	}
+
+	switch {
+	case kind == reflect.Bool:
+		val = reflect.ValueOf(ParseBool(strval, false))
+	case kind == reflect.String:
+		val = reflect.ValueOf(strval)
+	case kind == reflect.Int:
+		val = reflect.ValueOf(int(iv))
+	case kind == reflect.Int8:
+		val = reflect.ValueOf(int8(iv))
+	case kind == reflect.Int16:
+		val = reflect.ValueOf(int16(iv))
+	case kind == reflect.Int32:
+		val = reflect.ValueOf(int32(iv))
+	case kind == reflect.Int64:
+		val = reflect.ValueOf(iv)
+	case kind == reflect.Uint:
+		val = reflect.ValueOf(uint(uv))
+	case kind == reflect.Uint8:
+		val = reflect.ValueOf(uint8(uv))
+	case kind == reflect.Uint16:
+		val = reflect.ValueOf(uint16(uv))
+	case kind == reflect.Uint32:
+		val = reflect.ValueOf(uint32(uv))
+	case kind == reflect.Uint64:
+		val = reflect.ValueOf(uv)
+	case kind == reflect.Float32:
+		val = reflect.ValueOf(float32(fv))
+	case kind == reflect.Float64:
+		val = reflect.ValueOf(fv)
+	default:
+		return val, ErrUnsupportedType
+	}
+	return val, nil
 }
 
 func ParseBitSize(kind reflect.Kind) int {
@@ -169,7 +290,7 @@ func bindFlag(v reflect.Value, tagslice []string) {
 	}
 
 	val := NewValue(dval, v)
-	val.Set(dval) // Set default value
+	val.Set(dval) // Set default value first
 
 	defaultFlagSet.Var(val, name, usage)
 }
