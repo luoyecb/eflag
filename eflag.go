@@ -11,37 +11,11 @@ import (
 )
 
 var (
-	defaultStructTagName = "eflag"
-	defaultItemSep       = "@" // for slice,map: item1@item2@item3
-	defaultMapSep        = "=" // for map: key1=value1@key2=value2
-	defaultFlagSet       = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
-
-	ErrUnsupportedType = errors.New("Unsupported type")
-	ErrNotPointer      = errors.New("Parameter must be a pointer")
-	ErrNotStruct       = errors.New("Parameter must be a struct pointer")
+	defaultTagName = "flag"
+	defaultItemSep = "@" // item1@item2@item3
+	defaultMapSep  = "=" // key1=value1@key2=value2
+	defaultFlagSet = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 )
-
-func SetTagName(s string) {
-	if s != "" {
-		defaultStructTagName = s
-	}
-}
-
-func SetItemSep(s string) {
-	if s != "" {
-		defaultItemSep = s
-	}
-}
-
-func SetMapSep(s string) {
-	if s != "" {
-		defaultMapSep = s
-	}
-}
-
-func GetFlagSet() *flag.FlagSet {
-	return defaultFlagSet
-}
 
 type Value struct {
 	val  string
@@ -59,66 +33,80 @@ func (v *Value) String() string {
 	return v.val
 }
 
-func (v *Value) Set(dval string) error {
-	// Check time.Duration first
+func (v *Value) Set(sval string) error {
+	// First check the time.Duration
 	if _, ok := v.rval.Interface().(time.Duration); ok {
-		v.rval.SetInt(int64(ParseDuration(dval, 0)))
-		return nil
+		v.rval.SetInt(int64(ParseDuration(sval, 0)))
+	} else {
+		if val, err := ParseValue(v.rval.Type(), sval); err != nil {
+			return err
+		} else {
+			v.rval.Set(val)
+			v.val = sval
+		}
 	}
-
-	val, err := ParseValue(v.rval.Type(), dval)
-	if err != nil {
-		return err
-	}
-	v.rval.Set(val)
-	v.val = dval
 	return nil
 }
 
-func IsInt(kind reflect.Kind) bool {
-	switch kind {
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		return true
-	default:
-		return false
+func Parse(v interface{}) error {
+	if defaultFlagSet.Parsed() || v == nil {
+		return nil
 	}
+
+	rv := reflect.ValueOf(v)
+	if rv.Kind() != reflect.Ptr {
+		return errors.New("Parameter must be a pointer")
+	}
+	rv = rv.Elem()
+	if rv.Kind() != reflect.Struct {
+		return errors.New("Parameter must be a struct pointer")
+	}
+
+	rt := rv.Type()
+	for i, j := 0, rt.NumField(); i < j; i++ {
+		field := rt.Field(i)
+		if field.Anonymous { // ignore anonymous field
+			continue
+		}
+		if tagStr := field.Tag.Get(defaultTagName); tagStr != "" {
+			bindFlag(rv.Field(i), strings.Split(tagStr, ","))
+		}
+	}
+	return defaultFlagSet.Parse(os.Args[1:])
 }
 
-func IsUint(kind reflect.Kind) bool {
-	switch kind {
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		return true
-	default:
-		return false
+func bindFlag(v reflect.Value, tagslice []string) {
+	var dval string
+	if len(tagslice) > 1 {
+		dval = tagslice[1]
 	}
-}
 
-func IsFloat(kind reflect.Kind) bool {
-	switch kind {
-	case reflect.Float32, reflect.Float64:
-		return true
-	default:
-		return false
+	var usage string
+	if len(tagslice) > 2 {
+		usage = tagslice[2]
 	}
+
+	val := NewValue(dval, v)
+	val.Set(dval) // first set default value
+
+	defaultFlagSet.Var(val, tagslice[0], usage)
 }
 
 func ParseValue(typ reflect.Type, strval string) (reflect.Value, error) {
 	var val reflect.Value
-	var kind = typ.Kind()
 	items := strings.Split(strval, defaultItemSep)
-
-	if kind == reflect.Map {
-		kt, vt := typ.Key(), typ.Elem()
-		kkind, vkind := kt.Kind(), vt.Kind()
-		rmap := reflect.MakeMap(reflect.MapOf(kt, vt))
+	switch typ.Kind() {
+	case reflect.Map:
+		kkind := typ.Key().Kind()
+		vkind := typ.Elem().Kind()
+		rmap := reflect.MakeMap(reflect.MapOf(typ.Key(), typ.Elem()))
 		for _, item := range items {
-			strs := strings.Split(item, defaultMapSep)
-			if len(strs) >= 2 {
-				kval, err := ParseAtomValue(kkind, strs[0])
+			if elems := strings.Split(item, defaultMapSep); len(elems) >= 2 {
+				kval, err := ParseAtomValue(kkind, elems[0])
 				if err != nil {
 					return val, err
 				}
-				vval, err := ParseAtomValue(vkind, strs[1])
+				vval, err := ParseAtomValue(vkind, elems[1])
 				if err != nil {
 					return val, err
 				}
@@ -126,86 +114,56 @@ func ParseValue(typ reflect.Type, strval string) (reflect.Value, error) {
 			}
 		}
 		return rmap, nil
-	} else if kind == reflect.Slice {
-		rt := typ.Elem()
-		skind := rt.Kind()
-		slice := reflect.MakeSlice(reflect.SliceOf(rt), 0, len(items))
+	case reflect.Slice:
+		skind := typ.Elem().Kind()
+		slice := reflect.MakeSlice(reflect.SliceOf(typ.Elem()), 0, len(items))
 		for _, item := range items {
-			if sval, err := ParseAtomValue(skind, item); err != nil {
+			sval, err := ParseAtomValue(skind, item)
+			if err != nil {
 				return val, err
-			} else {
-				slice = reflect.Append(slice, sval)
 			}
+			slice = reflect.Append(slice, sval)
 		}
 		return slice, nil
-	}
-	return ParseAtomValue(kind, strval)
-}
-
-func ParseAtomValue(kind reflect.Kind, strval string) (reflect.Value, error) {
-	var iv int64
-	var uv uint64
-	var fv float64
-	var val reflect.Value
-
-	switch {
-	case IsInt(kind):
-		iv = ParseInt(strval, ParseBitSize(kind), 0)
-	case IsUint(kind):
-		uv = ParseUint(strval, ParseBitSize(kind), 0)
-	case IsFloat(kind):
-		fv = ParseFloat(strval, ParseBitSize(kind), float64(0))
-	}
-
-	switch {
-	case kind == reflect.Bool:
-		val = reflect.ValueOf(ParseBool(strval, false))
-	case kind == reflect.String:
-		val = reflect.ValueOf(strval)
-	case kind == reflect.Int:
-		val = reflect.ValueOf(int(iv))
-	case kind == reflect.Int8:
-		val = reflect.ValueOf(int8(iv))
-	case kind == reflect.Int16:
-		val = reflect.ValueOf(int16(iv))
-	case kind == reflect.Int32:
-		val = reflect.ValueOf(int32(iv))
-	case kind == reflect.Int64:
-		val = reflect.ValueOf(iv)
-	case kind == reflect.Uint:
-		val = reflect.ValueOf(uint(uv))
-	case kind == reflect.Uint8:
-		val = reflect.ValueOf(uint8(uv))
-	case kind == reflect.Uint16:
-		val = reflect.ValueOf(uint16(uv))
-	case kind == reflect.Uint32:
-		val = reflect.ValueOf(uint32(uv))
-	case kind == reflect.Uint64:
-		val = reflect.ValueOf(uv)
-	case kind == reflect.Float32:
-		val = reflect.ValueOf(float32(fv))
-	case kind == reflect.Float64:
-		val = reflect.ValueOf(fv)
 	default:
-		return val, ErrUnsupportedType
+		return ParseAtomValue(typ.Kind(), strval)
 	}
-	return val, nil
 }
 
-func ParseBitSize(kind reflect.Kind) int {
+func ParseAtomValue(kind reflect.Kind, strval string) (val reflect.Value, err error) {
 	switch kind {
-	case reflect.Int, reflect.Uint:
-		return 0
-	case reflect.Int8, reflect.Uint8:
-		return 8
-	case reflect.Int16, reflect.Uint16:
-		return 16
-	case reflect.Int32, reflect.Uint32, reflect.Float32:
-		return 32
-	case reflect.Int64, reflect.Uint64, reflect.Float64:
-		return 64
+	case reflect.Bool:
+		val = reflect.ValueOf(ParseBool(strval, false))
+	case reflect.String:
+		val = reflect.ValueOf(strval)
+	case reflect.Int:
+		val = reflect.ValueOf(int(ParseInt(strval, 0, 0)))
+	case reflect.Int8:
+		val = reflect.ValueOf(int8(ParseInt(strval, 8, 0)))
+	case reflect.Int16:
+		val = reflect.ValueOf(int16(ParseInt(strval, 16, 0)))
+	case reflect.Int32:
+		val = reflect.ValueOf(int32(ParseInt(strval, 32, 0)))
+	case reflect.Int64:
+		val = reflect.ValueOf(ParseInt(strval, 64, 0))
+	case reflect.Uint:
+		val = reflect.ValueOf(uint(ParseUint(strval, 0, 0)))
+	case reflect.Uint8:
+		val = reflect.ValueOf(uint8(ParseUint(strval, 8, 0)))
+	case reflect.Uint16:
+		val = reflect.ValueOf(uint16(ParseUint(strval, 16, 0)))
+	case reflect.Uint32:
+		val = reflect.ValueOf(uint32(ParseUint(strval, 32, 0)))
+	case reflect.Uint64:
+		val = reflect.ValueOf(ParseUint(strval, 64, 0))
+	case reflect.Float32:
+		val = reflect.ValueOf(float32(ParseFloat(strval, 32, float64(0))))
+	case reflect.Float64:
+		val = reflect.ValueOf(ParseFloat(strval, 64, float64(0)))
+	default:
+		err = errors.New("Unsupported kind type")
 	}
-	return 0
+	return
 }
 
 func ParseBool(s string, defval bool) bool {
@@ -248,49 +206,14 @@ func ParseDuration(s string, defval time.Duration) time.Duration {
 	}
 }
 
-func Parse(v interface{}) error {
-	if defaultFlagSet.Parsed() || v == nil {
-		return nil
-	}
-
-	rv := reflect.ValueOf(v)
-	if rv.Kind() != reflect.Ptr {
-		return ErrNotPointer
-	}
-	rv = rv.Elem()
-	if rv.Kind() != reflect.Struct {
-		return ErrNotStruct
-	}
-
-	rt := rv.Type()
-	for i, j := 0, rt.NumField(); i < j; i++ {
-		field := rt.Field(i)
-		if field.Anonymous { // Ignore anonymous fields
-			continue
-		}
-		tagStr := field.Tag.Get(defaultStructTagName)
-		if tagStr != "" {
-			bindFlag(rv.Field(i), strings.Split(tagStr, ","))
-		}
-	}
-
-	return defaultFlagSet.Parse(os.Args[1:])
+func SetTagName(s string) {
+	defaultTagName = s
 }
 
-func bindFlag(v reflect.Value, tagslice []string) {
-	var name = strings.TrimSpace(tagslice[0])
-	var dval string
-	var usage string
+func SetItemSep(s string) {
+	defaultItemSep = s
+}
 
-	if len(tagslice) > 1 {
-		dval = tagslice[1]
-	}
-	if len(tagslice) > 2 {
-		usage = tagslice[2]
-	}
-
-	val := NewValue(dval, v)
-	val.Set(dval) // Set default value first
-
-	defaultFlagSet.Var(val, name, usage)
+func SetMapSep(s string) {
+	defaultMapSep = s
 }
