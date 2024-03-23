@@ -1,10 +1,12 @@
-# eflag
-Enhanced std flag package.
-Bind command-line options to struct.
+package main
 
-# example
+import (
+	"fmt"
+	"time"
 
-```golang
+	"github.com/luoyecb/eflag"
+)
+
 type CommandOptions struct {
 	Name      string            `flag:"name" default:"lycb" usage:"user name"`
 	Age       int               `flag:"age" default:"23" usage:"user age"`
@@ -26,13 +28,3 @@ func main() {
 	eflag.Parse(cmdOpt)
 	fmt.Printf("%+v\n", cmdOpt)
 }
-
-```
-
-Test
-```sh
-go run example/demo.go -name=lisi -age=31 -man=false -salary=100 -sleep=1000000ms
-
-# output
-# &{Name:lisi Age:31 Man:false Salary:100 Sleep:16m40s Addresses:[beijing linzhou] Headers:map[lang:golang]}
-```
