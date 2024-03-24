@@ -67,7 +67,7 @@ func (e *EFlag) Parse(v interface{}) error {
 
 			var val flag.Value = NewValue(defval, rv.Field(i), e.config)
 			if field.Type.Kind() == reflect.Bool {
-				val = NewBoolValue(val.(*Value))
+				val = NewBoolValue(*(val.(*Value)))
 			}
 			val.Set(defval)
 
@@ -126,11 +126,11 @@ func (v *Value) Set(sval string) error {
 
 // BoolValue set flag as bool option.
 type BoolValue struct {
-	*Value
+	Value
 }
 
 // NewBoolValue is the constructor of BoolValue.
-func NewBoolValue(v *Value) *BoolValue {
+func NewBoolValue(v Value) *BoolValue {
 	return &BoolValue{v}
 }
 
