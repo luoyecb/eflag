@@ -64,7 +64,11 @@ func (e *EFlag) Parse(v interface{}) error {
 		tagName := field.Tag.Get(e.config.TagName)
 		if tagName != "" {
 			defval := field.Tag.Get("default") // parse default value from tag
-			val := NewValue(defval, rv.Field(i), e.config)
+
+			var val flag.Value = NewValue(defval, rv.Field(i), e.config)
+			if field.Type.Kind() == reflect.Bool {
+				val = NewBoolValue(val.(*Value))
+			}
 			val.Set(defval)
 
 			// parse default value from default method
@@ -118,4 +122,18 @@ func (v *Value) Set(sval string) error {
 		v.val = sval
 		return nil
 	}
+}
+
+// BoolValue set flag as bool option.
+type BoolValue struct {
+	*Value
+}
+
+// NewBoolValue is the constructor of BoolValue.
+func NewBoolValue(v *Value) *BoolValue {
+	return &BoolValue{v}
+}
+
+func (b *BoolValue) IsBoolFlag() bool {
+	return true
 }
