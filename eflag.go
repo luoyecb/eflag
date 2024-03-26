@@ -19,10 +19,19 @@ func Parse(v interface{}) error {
 	return defaultEFlag.Parse(v)
 }
 
+func ParseAndRunCommand(v interface{}) error {
+	err := defaultEFlag.Parse(v)
+	if err != nil {
+		return err
+	}
+	return defaultEFlag.RunCommand()
+}
+
 // EFlag
 type EFlag struct {
 	flagSet *flag.FlagSet
 	config  *Config
+	input   interface{}
 }
 
 // NewEFlag is the constructor of EFlag.
@@ -40,50 +49,47 @@ func NewEFlag(options ...EFlagOption) *EFlag {
 
 // Parse parse command-line options to v.
 func (e *EFlag) Parse(v interface{}) error {
-	if e.flagSet.Parsed() || v == nil {
+	if e.flagSet.Parsed() {
 		return nil
 	}
-
-	rv := reflect.ValueOf(v)
-	if rv.Kind() != reflect.Ptr {
-		return errors.New("Must be a pointer")
-	}
-	rvp := rv // save pointer
-	rv = rv.Elem()
-	if rv.Kind() != reflect.Struct {
-		return errors.New("must be a struct")
+	if !isStructPtr(v) {
+		return errors.New("Must be a pointer to a struct type")
 	}
 
-	rt := rv.Type()
-	for i, j := 0, rt.NumField(); i < j; i++ {
-		field := rt.Field(i)
+	e.input = v
+	ReflectVisitStructField(v, func(rv reflect.Value, field reflect.StructField, value reflect.Value) bool {
 		if field.Anonymous {
-			continue
+			return false
 		}
-
 		tagName := field.Tag.Get(e.config.TagName)
-		if tagName != "" {
-			defval := field.Tag.Get("default") // parse default value from tag
-
-			var val flag.Value = NewValue(defval, rv.Field(i), e.config)
-			if field.Type.Kind() == reflect.Bool {
-				val = NewBoolValue(*(val.(*Value)))
-			}
-			val.Set(defval)
-
-			// parse default value from default method
-			rm := rvp.MethodByName(field.Name + "Default")
-			if rm.IsValid() {
-				results := rm.Call(nil)
-				if len(results) > 0 {
-					rv.Field(i).Set(results[0])
-				}
-			}
-
-			e.flagSet.Var(val, tagName, field.Tag.Get("usage"))
+		if tagName == "" {
+			return false
 		}
-	}
+
+		defval := field.Tag.Get("default") // parse default value from tag
+
+		var val flag.Value = NewValue(defval, value, e.config)
+		if field.Type.Kind() == reflect.Bool {
+			val = NewBoolValue(*(val.(*Value)))
+		}
+		val.Set(defval)
+
+		// parse default value from default method
+		if rm := rv.MethodByName(field.Name + "Default"); rm.IsValid() {
+			results := rm.Call(nil)
+			if len(results) > 0 {
+				value.Set(results[0])
+			}
+		}
+
+		e.flagSet.Var(val, tagName, field.Tag.Get("usage"))
+		return false
+	})
 	return e.flagSet.Parse(os.Args[1:])
+}
+
+func (e *EFlag) RunCommand() error {
+	return RunCommand(e.input)
 }
 
 // Value implemented flag.Value interface.

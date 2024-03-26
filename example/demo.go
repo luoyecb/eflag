@@ -15,6 +15,9 @@ type CommandOptions struct {
 	Sleep     time.Duration     `flag:"sleep" default:"10ms" usage:"sleep duration"`
 	Addresses []string          `flag:"addr" default:"beijing@linzhou" usage:"home address"`
 	Headers   map[string]string `flag:"header" default:"name=lisi@age=30@Content-Type=application/json" usage:"request header"`
+
+	ShowList   bool `flag:"show_list" default:"false" usage:"show list" command:""`
+	ShowDetail bool `flag:"show_detail" default:"false" usage:"show detail" command:""`
 }
 
 func (opt *CommandOptions) HeadersDefault() map[string]string {
@@ -23,8 +26,21 @@ func (opt *CommandOptions) HeadersDefault() map[string]string {
 	}
 }
 
+func (opt *CommandOptions) ShowListCommand() {
+	fmt.Println("show list")
+}
+
+func (opt *CommandOptions) ShowDetailCommand() {
+	fmt.Println("show detail")
+}
+
 func main() {
 	cmdOpt := &CommandOptions{}
-	eflag.Parse(cmdOpt)
+
+	// eflag.Parse(cmdOpt)
+	// fmt.Printf("%+v\n", cmdOpt)
+	// eflag.RunCommand(cmdOpt)
+
+	eflag.ParseAndRunCommand(cmdOpt)
 	fmt.Printf("%+v\n", cmdOpt)
 }
