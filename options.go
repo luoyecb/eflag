@@ -3,9 +3,10 @@ package eflag
 var (
 	// default config
 	defaultConfig = Config{
-		TagName: "flag",
-		ItemSep: "@", // item1@item2@item3
-		MapSep:  "=", // key1=value1@key2=value2
+		TagName:      "flag",
+		TagNameShort: "flag_short",
+		ItemSep:      "@", // item1@item2@item3
+		MapSep:       "=", // key1=value1@key2=value2
 	}
 )
 
@@ -13,6 +14,8 @@ var (
 type Config struct {
 	// struct tag name
 	TagName string
+	// short tag name
+	TagNameShort string
 	// array element separator
 	ItemSep string
 	// map element separator
@@ -26,6 +29,13 @@ type EFlagOption func(*Config)
 func WithTagName(tag string) EFlagOption {
 	return func(c *Config) {
 		c.TagName = tag
+	}
+}
+
+// Specify struct short tag name.
+func WithTagNameShort(tag string) EFlagOption {
+	return func(c *Config) {
+		c.TagNameShort = tag
 	}
 }
 

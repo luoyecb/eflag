@@ -5,6 +5,7 @@ package eflag
 import (
 	"errors"
 	"flag"
+	"fmt"
 	"os"
 	"reflect"
 	"time"
@@ -82,7 +83,16 @@ func (e *EFlag) Parse(v interface{}) error {
 			}
 		}
 
-		e.flagSet.Var(val, tagName, field.Tag.Get("usage"))
+		usage := field.Tag.Get("usage")
+		e.flagSet.Var(val, tagName, usage)
+
+		// parse short tag
+		tagNameShort := field.Tag.Get(e.config.TagNameShort)
+		if tagNameShort != "" {
+			cval := val
+			e.flagSet.Var(cval, tagNameShort, fmt.Sprintf("%s(same as %s)", usage, tagName))
+		}
+
 		return false
 	})
 	return e.flagSet.Parse(os.Args[1:])
