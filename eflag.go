@@ -95,7 +95,31 @@ func (e *EFlag) Parse(v interface{}) error {
 
 		return false
 	})
-	return e.flagSet.Parse(os.Args[1:])
+
+	err := e.flagSet.Parse(os.Args[1:])
+	if err == nil {
+		e.setArgs(v)
+	}
+	return err
+}
+
+func (e *EFlag) setArgs(v interface{}) {
+	if e.flagSet.NArg() == 0 {
+		return
+	}
+	elem := reflect.ValueOf(v).Elem()
+
+	// check type
+	rt := elem.Type()
+	structField, ok := rt.FieldByName("Args")
+	if !ok {
+		return
+	}
+	if structField.Type.Kind() != reflect.Slice || structField.Type.Elem().Kind() != reflect.String {
+		return
+	}
+	// set value
+	elem.FieldByName("Args").Set(reflect.ValueOf(e.flagSet.Args()))
 }
 
 func (e *EFlag) RunCommand() error {

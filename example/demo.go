@@ -18,6 +18,8 @@ type CommandOptions struct {
 
 	ShowList   bool `flag:"show_list" default:"false" usage:"show list" command:""`
 	ShowDetail bool `flag:"show_detail" default:"false" usage:"show detail" command:""`
+
+	Args []string
 }
 
 func (opt *CommandOptions) HeadersDefault() map[string]string {
