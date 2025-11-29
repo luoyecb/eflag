@@ -21,11 +21,20 @@ func ReflectVisitStructField(v interface{}, fn func(vType reflect.Value, field r
 
 	rt := rv.Type()
 	for i := 0; i < rt.NumField(); i++ {
-		breakLoop := fn(reflect.ValueOf(v), rt.Field(i), rv.Field(i))
-		if breakLoop {
+		if fn(reflect.ValueOf(v), rt.Field(i), rv.Field(i)) {
 			break
 		}
 	}
+}
+
+func isReflectType(typ reflect.Type, expected ...reflect.Kind) bool {
+	kind := typ.Kind()
+	for _, k := range expected {
+		if kind == k {
+			return true
+		}
+	}
+	return false
 }
 
 func isStructPtr(v interface{}) bool {

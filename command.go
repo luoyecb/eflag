@@ -12,7 +12,10 @@ func RunCommand(v interface{}) error {
 	}
 
 	ReflectVisitStructField(v, func(rv reflect.Value, field reflect.StructField, value reflect.Value) bool {
-		if field.Anonymous || field.Type.Kind() != reflect.Bool {
+		if field.Anonymous {
+			return false
+		}
+		if !isReflectType(field.Type, reflect.Bool, reflect.String) {
 			return false
 		}
 		cmdStr, ok := field.Tag.Lookup("command")
@@ -20,9 +23,12 @@ func RunCommand(v interface{}) error {
 			return false
 		}
 
+		fieldKind := field.Type.Kind()
+
 		methodName := field.Name + "Command"
-		runFlag := "true"
+		runFlag := ""
 		if cmdStr != "" {
+			// format: methodName,runFlag
 			parts := strings.Split(cmdStr, ",")
 			if p1 := strings.TrimSpace(parts[0]); p1 != "" {
 				methodName = p1
@@ -31,10 +37,29 @@ func RunCommand(v interface{}) error {
 				runFlag = strings.TrimSpace(parts[1])
 			}
 		}
+		if runFlag == "" {
+			// default runFlag
+			if fieldKind == reflect.Bool {
+				runFlag = "true"
+			} else if fieldKind == reflect.String {
+				runFlag = "notempty"
+			}
+		}
 
-		if rm := rv.MethodByName(methodName); rm.IsValid() {
+		// call command method
+		rm := rv.MethodByName(methodName)
+		if !rm.IsValid() {
+			return false
+		}
+		if fieldKind == reflect.Bool {
 			val := value.Bool()
 			if (val && runFlag == "true") || (!val && runFlag == "false") {
+				rm.Call(nil)
+				return true
+			}
+		} else if fieldKind == reflect.String {
+			sval := value.String()
+			if (sval == "" && runFlag == "empty") || (sval != "" && runFlag == "notempty") {
 				rm.Call(nil)
 				return true
 			}

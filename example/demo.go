@@ -16,8 +16,9 @@ type CommandOptions struct {
 	Addresses []string          `flag:"addr" default:"beijing@linzhou" usage:"home address"`
 	Headers   map[string]string `flag:"header" default:"name=lisi@age=30@Content-Type=application/json" usage:"request header"`
 
-	ShowList   bool `flag:"show_list" default:"false" usage:"show list" command:""`
-	ShowDetail bool `flag:"show_detail" default:"false" usage:"show detail" command:""`
+	ShowList   bool   `flag:"show_list" default:"false" usage:"show list" command:""`
+	ShowDetail bool   `flag:"show_detail" default:"true" usage:"show detail" command:",false"`
+	Cover      string `flag:"cover" default:"" usage:"add cover" command:""`
 
 	Args []string
 }
@@ -36,6 +37,11 @@ func (opt *CommandOptions) ShowDetailCommand() {
 	fmt.Println("show detail")
 }
 
+func (opt *CommandOptions) CoverCommand() {
+	fmt.Println("cover")
+}
+
+// :fmt
 func main() {
 	cmdOpt := &CommandOptions{}
 
