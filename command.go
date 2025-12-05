@@ -2,6 +2,8 @@ package eflag
 
 import (
 	"errors"
+	"fmt"
+	"os"
 	"reflect"
 	"strings"
 )
@@ -21,7 +23,7 @@ const (
 	COMMAND_MODE_SUB_CMD                    // Sub command, eg: go run main.go SUB_COMMAND
 )
 
-func runCommand(v interface{}, subCommandName string) error {
+func runCommand(e *EFlag, v interface{}, subCommandName string) error {
 	if !isStructPtr(v) {
 		return errors.New("Must be a pointer to a struct type")
 	}
@@ -30,6 +32,8 @@ func runCommand(v interface{}, subCommandName string) error {
 		return nil
 	}
 
+	// Call sub command
+	hasFound := false
 	ReflectVisitStructField(v, true, func(rv reflect.Value, field reflect.StructField, fieldValue reflect.Value) bool {
 		tagStr, ok := field.Tag.Lookup(COMMAND_SUB_COMMAND_TAG_KEY)
 		if !ok || tagStr != subCommandName {
@@ -37,14 +41,21 @@ func runCommand(v interface{}, subCommandName string) error {
 		}
 		method := rv.MethodByName(field.Name + COMMAND_METHOD_NAME_KEY)
 		if method.IsValid() {
+			hasFound = true
 			method.Call(nil)
 			return true
 		}
 		return false
 	})
+	if !hasFound {
+		fmt.Fprintf(os.Stderr, "Not support sub command\n")
+		e.Usage()
+		os.Exit(1)
+	}
 	return nil
 }
 
+// Call option command
 func callCommand(rv reflect.Value, field reflect.StructField, fieldValue reflect.Value) bool {
 	if !isReflectType(field.Type, reflect.Bool, reflect.String) {
 		return false

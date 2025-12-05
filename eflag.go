@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"strings"
 )
 
 var (
@@ -34,8 +35,11 @@ type EFlag struct {
 	config  *Config
 	input   interface{}
 
+	errOutput strings.Builder
+
 	commandMode    CommandMode
 	subCommandName string
+	subCommandList []string
 }
 
 // NewEFlag is the constructor of EFlag.
@@ -45,11 +49,14 @@ func NewEFlag(commandMode CommandMode, options ...EFlagOption) *EFlag {
 		opt(&config)
 	}
 
-	return &EFlag{
+	eFlag := &EFlag{
 		flagSet:     flag.NewFlagSet(os.Args[0], flag.ExitOnError),
 		config:      &config,
 		commandMode: commandMode,
 	}
+	eFlag.flagSet.Usage = eFlag.Usage
+	eFlag.flagSet.SetOutput(&eFlag.errOutput)
+	return eFlag
 }
 
 // Parse parse command-line options to v.
@@ -71,6 +78,15 @@ func (e *EFlag) Parse(v interface{}) error {
 	return err
 }
 
+func (e *EFlag) collectSubCommand(field reflect.StructField) {
+	if e.commandMode == COMMAND_MODE_SUB_CMD {
+		tagStr, ok := field.Tag.Lookup(COMMAND_SUB_COMMAND_TAG_KEY)
+		if ok && tagStr != "" {
+			e.subCommandList = append(e.subCommandList, tagStr)
+		}
+	}
+}
+
 func (e *EFlag) checkCommandMode(exitOnError bool) (args []string) {
 	if e.commandMode == COMMAND_MODE_SUB_CMD {
 		isErr := true
@@ -82,7 +98,7 @@ func (e *EFlag) checkCommandMode(exitOnError bool) (args []string) {
 			}
 		}
 		if isErr && exitOnError {
-			fmt.Fprintf(os.Stderr, "Not a valid sub command format\n")
+			fmt.Fprintf(os.Stderr, "Not valid sub command format\n")
 			os.Exit(1)
 		}
 	} else if e.commandMode == COMMAND_MODE_OPTION {
@@ -92,6 +108,8 @@ func (e *EFlag) checkCommandMode(exitOnError bool) (args []string) {
 }
 
 func (e *EFlag) parse(rv reflect.Value, field reflect.StructField, fieldValue reflect.Value) (ret bool) {
+	e.collectSubCommand(field)
+
 	tagName := field.Tag.Get(e.config.TagName)
 	if tagName == "" {
 		return
@@ -145,5 +163,21 @@ func (e *EFlag) setArgs(v interface{}) {
 }
 
 func (e *EFlag) RunCommand() error {
-	return runCommand(e.input, e.subCommandName)
+	return runCommand(e, e.input, e.subCommandName)
+}
+
+func (e *EFlag) Usage() {
+	binName := e.flagSet.Name()
+	if e.errOutput.Len() != 0 {
+		e.errOutput.WriteByte('\n')
+	}
+	e.errOutput.WriteString(fmt.Sprintf("Usage of %s:\n", binName))
+	if e.commandMode == COMMAND_MODE_SUB_CMD && len(e.subCommandList) > 0 {
+		e.errOutput.WriteString(fmt.Sprintf("%s {SUB_COMMAND} {OPTION}\n", binName))
+		e.errOutput.WriteString("SUB_COMMAND is\n  ")
+		e.errOutput.WriteString(strings.Join(e.subCommandList, "\n  "))
+		e.errOutput.WriteString("\nOPTION is\n")
+	}
+	e.flagSet.PrintDefaults()
+	fmt.Print(e.errOutput.String())
 }
