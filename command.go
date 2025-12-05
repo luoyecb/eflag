@@ -6,7 +6,12 @@ import (
 	"strings"
 )
 
-func RunCommand(v interface{}) error {
+const (
+	COMMAND_FIELD_TAG_KEY   = "command"
+	COMMAND_METHOD_NAME_KEY = "Command"
+)
+
+func runCommand(v interface{}) error {
 	if !isStructPtr(v) {
 		return errors.New("Must be a pointer to a struct type")
 	}
@@ -18,53 +23,64 @@ func RunCommand(v interface{}) error {
 		if !isReflectType(field.Type, reflect.Bool, reflect.String) {
 			return false
 		}
-		cmdStr, ok := field.Tag.Lookup("command")
+		cmdStr, ok := field.Tag.Lookup(COMMAND_FIELD_TAG_KEY)
 		if !ok {
 			return false
 		}
 
-		fieldKind := field.Type.Kind()
-
-		methodName := field.Name + "Command"
-		runFlag := ""
-		if cmdStr != "" {
-			// format: methodName,runFlag
-			parts := strings.Split(cmdStr, ",")
-			if p1 := strings.TrimSpace(parts[0]); p1 != "" {
-				methodName = p1
-			}
-			if len(parts) == 2 {
-				runFlag = strings.TrimSpace(parts[1])
-			}
-		}
-		if runFlag == "" {
-			// default runFlag
-			if fieldKind == reflect.Bool {
-				runFlag = "true"
-			} else if fieldKind == reflect.String {
-				runFlag = "notempty"
-			}
-		}
-
-		// call command method
-		rm := rv.MethodByName(methodName)
+		methodName, runFlag := parseCommand(cmdStr, field.Type.Kind(), field.Name)
+		rm := rv.MethodByName(methodName + COMMAND_METHOD_NAME_KEY)
 		if !rm.IsValid() {
 			return false
 		}
-		if fieldKind == reflect.Bool {
-			val := value.Bool()
-			if (val && runFlag == "true") || (!val && runFlag == "false") {
-				rm.Call(nil)
-				return true
-			}
-		} else if fieldKind == reflect.String {
-			sval := value.String()
-			if (sval == "" && runFlag == "empty") || (sval != "" && runFlag == "notempty") {
-				rm.Call(nil)
-				return true
-			}
-		}
-		return false
+		return callCommand(rm, value, runFlag)
 	})
 	return nil
+}
+
+func callCommand(method reflect.Value, value reflect.Value, runFlag string) (called bool) {
+	isRun := false
+	switch value.Kind() {
+	case reflect.Bool:
+		b := value.Bool()
+		isRun = (b && runFlag == "true") || (!b && runFlag == "false")
+	case reflect.String:
+		s := value.String()
+		isRun = (s == "" && runFlag == "empty") || (s != "" && runFlag == "notempty")
+	default:
+	}
+	if isRun {
+		method.Call(nil)
+	}
+	return isRun
+}
+
+// Format: methodName,runFlag
+// Possible runFlag: true false
+func parseCommand(cmdStr string, kind reflect.Kind, defaultMethodName string) (methodName, runFlag string) {
+	parts := strings.Split(cmdStr, ",")
+	if p1 := strings.TrimSpace(parts[0]); p1 != "" {
+		methodName = p1
+	}
+	if len(parts) == 2 {
+		runFlag = strings.TrimSpace(parts[1])
+	}
+
+	// default
+	if methodName == "" {
+		methodName = defaultMethodName
+	}
+	if runFlag == "" {
+		runFlag = defaultRunFlag(kind)
+	}
+	return
+}
+
+func defaultRunFlag(kind reflect.Kind) string {
+	if kind == reflect.Bool {
+		return "true"
+	} else if kind == reflect.String {
+		return "notempty"
+	}
+	return ""
 }

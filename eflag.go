@@ -123,7 +123,7 @@ func (e *EFlag) setArgs(v interface{}) {
 }
 
 func (e *EFlag) RunCommand() error {
-	return RunCommand(e.input)
+	return runCommand(e.input)
 }
 
 // Value implemented flag.Value interface.
