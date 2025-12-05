@@ -8,11 +8,11 @@ import (
 	"fmt"
 	"os"
 	"reflect"
-	"time"
 )
 
 var (
-	defaultEFlag = NewEFlag()
+	defaultEFlag = NewEFlag(COMMAND_MODE_OPTION)
+	// defaultEFlag = NewEFlag(COMMAND_MODE_SUB_CMD)
 )
 
 // Parse parse command-line options to v.
@@ -33,18 +33,22 @@ type EFlag struct {
 	flagSet *flag.FlagSet
 	config  *Config
 	input   interface{}
+
+	commandMode    CommandMode
+	subCommandName string
 }
 
 // NewEFlag is the constructor of EFlag.
-func NewEFlag(options ...EFlagOption) *EFlag {
+func NewEFlag(commandMode CommandMode, options ...EFlagOption) *EFlag {
 	config := defaultConfig
 	for _, opt := range options {
 		opt(&config)
 	}
 
 	return &EFlag{
-		flagSet: flag.NewFlagSet(os.Args[0], flag.ExitOnError),
-		config:  &config,
+		flagSet:     flag.NewFlagSet(os.Args[0], flag.ExitOnError),
+		config:      &config,
+		commandMode: commandMode,
 	}
 }
 
@@ -58,122 +62,88 @@ func (e *EFlag) Parse(v interface{}) error {
 	}
 
 	e.input = v
-	ReflectVisitStructField(v, func(rv reflect.Value, field reflect.StructField, value reflect.Value) bool {
-		if field.Anonymous {
-			return false
-		}
-		tagName := field.Tag.Get(e.config.TagName)
-		if tagName == "" {
-			return false
-		}
+	ReflectVisitStructField(v, true, e.parse)
 
-		defval := field.Tag.Get("default") // parse default value from tag
-
-		var val flag.Value = NewValue(defval, value, e.config)
-		if field.Type.Kind() == reflect.Bool {
-			val = NewBoolValue(*(val.(*Value)))
-		}
-		val.Set(defval)
-
-		// parse default value from default method
-		if rm := rv.MethodByName(field.Name + "Default"); rm.IsValid() {
-			results := rm.Call(nil)
-			if len(results) > 0 {
-				value.Set(results[0])
-			}
-		}
-
-		usage := field.Tag.Get("usage")
-		e.flagSet.Var(val, tagName, usage)
-
-		// parse short tag
-		tagNameShort := field.Tag.Get(e.config.TagNameShort)
-		if tagNameShort != "" {
-			cval := val
-			e.flagSet.Var(cval, tagNameShort, fmt.Sprintf("%s(same as %s)", usage, tagName))
-		}
-
-		return false
-	})
-
-	err := e.flagSet.Parse(os.Args[1:])
+	err := e.flagSet.Parse(e.checkCommandMode(true))
 	if err == nil {
 		e.setArgs(v)
 	}
 	return err
 }
 
-func (e *EFlag) setArgs(v interface{}) {
-	if e.flagSet.NArg() == 0 {
-		return
+func (e *EFlag) checkCommandMode(exitOnError bool) (args []string) {
+	if e.commandMode == COMMAND_MODE_SUB_CMD {
+		isErr := true
+		if len(os.Args) > SUM_COMMAND_INDEX {
+			if name := os.Args[SUM_COMMAND_INDEX]; name[0] != '-' {
+				isErr = false
+				e.subCommandName = name
+				args = os.Args[SUM_COMMAND_INDEX+1:]
+			}
+		}
+		if isErr && exitOnError {
+			fmt.Fprintf(os.Stderr, "Not a valid sub command format\n")
+			os.Exit(1)
+		}
+	} else if e.commandMode == COMMAND_MODE_OPTION {
+		args = os.Args[1:]
 	}
-	elem := reflect.ValueOf(v).Elem()
+	return
+}
 
-	// check type
-	rt := elem.Type()
-	structField, ok := rt.FieldByName("Args")
-	if !ok {
+func (e *EFlag) parse(rv reflect.Value, field reflect.StructField, fieldValue reflect.Value) (ret bool) {
+	tagName := field.Tag.Get(e.config.TagName)
+	if tagName == "" {
 		return
 	}
-	if structField.Type.Kind() != reflect.Slice || structField.Type.Elem().Kind() != reflect.String {
-		return
+
+	val := e.parseDefault(rv, field, fieldValue)
+	usage := field.Tag.Get("usage")
+	e.flagSet.Var(val, tagName, usage)
+
+	// parse short tag
+	tagNameShort := field.Tag.Get(e.config.TagNameShort)
+	if tagNameShort != "" {
+		cval := val
+		e.flagSet.Var(cval, tagNameShort, fmt.Sprintf("%s(same as %s)", usage, tagName))
 	}
-	// set value
-	elem.FieldByName("Args").Set(reflect.ValueOf(e.flagSet.Args()))
+	return
+}
+
+func (e *EFlag) parseDefault(rv reflect.Value, field reflect.StructField, fieldValue reflect.Value) flag.Value {
+	defaultValue := field.Tag.Get("default") // from struct tag
+
+	var flagValue flag.Value
+
+	val := NewValue(defaultValue, fieldValue, e.config)
+	flagValue = val
+	if fieldValue.Kind() == reflect.Bool {
+		flagValue = NewBoolValue(*val)
+	}
+
+	flagValue.Set(defaultValue)
+	// from default method
+	rm := rv.MethodByName(field.Name + "Default")
+	if rm.IsValid() {
+		if results := rm.Call(nil); len(results) > 0 {
+			fieldValue.Set(results[0])
+		}
+	}
+	return flagValue
+}
+
+func (e *EFlag) setArgs(v interface{}) {
+	if e.flagSet.NArg() > 0 {
+		elem := reflect.ValueOf(v).Elem()
+		structField, ok := elem.Type().FieldByName("Args")
+		if !ok || !isStringSlice(structField) {
+			return
+		}
+		// set args
+		elem.FieldByName("Args").Set(reflect.ValueOf(e.flagSet.Args()))
+	}
 }
 
 func (e *EFlag) RunCommand() error {
-	return runCommand(e.input)
-}
-
-// Value implemented flag.Value interface.
-type Value struct {
-	val    string
-	rval   reflect.Value
-	config *Config
-}
-
-// NewValue is the constructor of Value.
-func NewValue(v string, rv reflect.Value, c *Config) *Value {
-	return &Value{
-		val:    v,
-		rval:   rv,
-		config: c,
-	}
-}
-
-// String
-func (v *Value) String() string {
-	return v.val
-}
-
-// Set set new value.
-func (v *Value) Set(sval string) error {
-	// first check time.Duration
-	if _, ok := v.rval.Interface().(time.Duration); ok {
-		v.rval.SetInt(int64(ParseDuration(sval, 0)))
-		return nil
-	}
-
-	if val, err := ParseValue(v.rval.Type(), sval, v.config.ItemSep, v.config.MapSep); err != nil {
-		return err
-	} else {
-		v.rval.Set(val)
-		v.val = sval
-		return nil
-	}
-}
-
-// BoolValue set flag as bool option.
-type BoolValue struct {
-	Value
-}
-
-// NewBoolValue is the constructor of BoolValue.
-func NewBoolValue(v Value) *BoolValue {
-	return &BoolValue{v}
-}
-
-func (b *BoolValue) IsBoolFlag() bool {
-	return true
+	return runCommand(e.input, e.subCommandName)
 }

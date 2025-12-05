@@ -4,7 +4,7 @@ import (
 	"reflect"
 )
 
-func ReflectVisitStructField(v interface{}, fn func(vType reflect.Value, field reflect.StructField, value reflect.Value) bool) {
+func ReflectVisitStructField(v interface{}, ignoreAnonymous bool, fn func(vType reflect.Value, field reflect.StructField, fieldValue reflect.Value) bool) {
 	if v == nil || fn == nil {
 		return
 	}
@@ -19,9 +19,14 @@ func ReflectVisitStructField(v interface{}, fn func(vType reflect.Value, field r
 		return
 	}
 
+	rawRv := reflect.ValueOf(v)
 	rt := rv.Type()
 	for i := 0; i < rt.NumField(); i++ {
-		if fn(reflect.ValueOf(v), rt.Field(i), rv.Field(i)) {
+		field := rt.Field(i)
+		if field.Anonymous && ignoreAnonymous {
+			continue
+		}
+		if fn(rawRv, field, rv.Field(i)) {
 			break
 		}
 	}
@@ -35,6 +40,16 @@ func isReflectType(typ reflect.Type, expected ...reflect.Kind) bool {
 		}
 	}
 	return false
+}
+
+func isStringSlice(field reflect.StructField) bool {
+	if field.Type.Kind() != reflect.Slice {
+		return false
+	}
+	if field.Type.Elem().Kind() != reflect.String {
+		return false
+	}
+	return true
 }
 
 func isStructPtr(v interface{}) bool {

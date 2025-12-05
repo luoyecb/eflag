@@ -20,6 +20,8 @@ type CommandOptions struct {
 	ShowDetail bool   `flag:"show_detail" default:"true" usage:"show detail" command:",false"`
 	Cover      string `flag:"cover" default:"" usage:"add cover" command:""`
 
+	Show string `sub_command:"show"`
+
 	Args []string
 }
 
@@ -27,6 +29,14 @@ func (opt *CommandOptions) HeadersDefault() map[string]string {
 	return map[string]string{
 		"lang": "golang",
 	}
+}
+
+func (opt *CommandOptions) ManDefault() bool {
+	return true
+}
+
+func (opt *CommandOptions) ShowCommand() {
+	fmt.Println("show sub_command")
 }
 
 func (opt *CommandOptions) ShowListCommand() {
