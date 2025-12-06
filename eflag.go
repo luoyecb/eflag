@@ -22,11 +22,7 @@ func Parse(v interface{}) error {
 }
 
 func ParseAndRunCommand(v interface{}) error {
-	err := defaultEFlag.Parse(v)
-	if err != nil {
-		return err
-	}
-	return defaultEFlag.RunCommand()
+	return defaultEFlag.ParseAndRunCommand(v)
 }
 
 // EFlag
@@ -39,7 +35,7 @@ type EFlag struct {
 
 	commandMode    CommandMode
 	subCommandName string
-	subCommandList []string
+	subCommandList []*Command
 }
 
 // NewEFlag is the constructor of EFlag.
@@ -82,7 +78,8 @@ func (e *EFlag) collectSubCommand(field reflect.StructField) {
 	if e.commandMode == COMMAND_MODE_SUB_CMD {
 		tagStr, ok := field.Tag.Lookup(COMMAND_SUB_COMMAND_TAG_KEY)
 		if ok && tagStr != "" {
-			e.subCommandList = append(e.subCommandList, tagStr)
+			usage := field.Tag.Get("usage")
+			e.subCommandList = append(e.subCommandList, NewCommand(tagStr, usage))
 		}
 	}
 }
@@ -166,6 +163,13 @@ func (e *EFlag) RunCommand() error {
 	return runCommand(e, e.input, e.subCommandName)
 }
 
+func (e *EFlag) ParseAndRunCommand(v interface{}) error {
+	if err := e.Parse(v); err != nil {
+		return err
+	}
+	return e.RunCommand()
+}
+
 func (e *EFlag) Usage() {
 	binName := e.flagSet.Name()
 	if e.errOutput.Len() != 0 {
@@ -174,8 +178,8 @@ func (e *EFlag) Usage() {
 	e.errOutput.WriteString(fmt.Sprintf("Usage of %s:\n", binName))
 	if e.commandMode == COMMAND_MODE_SUB_CMD && len(e.subCommandList) > 0 {
 		e.errOutput.WriteString(fmt.Sprintf("%s {SUB_COMMAND} {OPTION}\n", binName))
-		e.errOutput.WriteString("SUB_COMMAND is\n  ")
-		e.errOutput.WriteString(strings.Join(e.subCommandList, "\n  "))
+		e.errOutput.WriteString("SUB_COMMAND is\n")
+		e.errOutput.WriteString(formatCommandUsage(e.subCommandList))
 		e.errOutput.WriteString("\nOPTION is\n")
 	}
 	e.flagSet.PrintDefaults()

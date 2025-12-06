@@ -20,7 +20,8 @@ type CommandOptions struct {
 	ShowDetail bool   `flag:"show_detail" default:"true" usage:"show detail" command:",false"`
 	Cover      string `flag:"cover" default:"" usage:"add cover" command:""`
 
-	Show string `sub_command:"show"`
+	Show   string `sub_command:"show" usage:"show action"`
+	Detail bool   `sub_command:"detail" usage:"show detail action"`
 
 	Args []string
 }
@@ -59,6 +60,7 @@ func main() {
 	// fmt.Printf("%+v\n", cmdOpt)
 	// eflag.RunCommand(cmdOpt)
 
-	eflag.ParseAndRunCommand(cmdOpt)
+	flag := eflag.NewEFlag(eflag.COMMAND_MODE_SUB_CMD)
+	flag.ParseAndRunCommand(cmdOpt)
 	fmt.Printf("%+v\n", cmdOpt)
 }

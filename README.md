@@ -18,7 +18,8 @@ type CommandOptions struct {
 	ShowDetail bool   `flag:"show_detail" default:"true" usage:"show detail" command:",false"`
 	Cover      string `flag:"cover" default:"" usage:"add cover" command:""`
 
-	Show string `sub_command:"show"`
+	Show   string `sub_command:"show" usage:"show action"`
+	Detail bool   `sub_command:"detail" usage:"show detail action"`
 
 	Args []string
 }

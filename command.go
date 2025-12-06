@@ -6,6 +6,8 @@ import (
 	"os"
 	"reflect"
 	"strings"
+
+	"github.com/luoyecb/eflag/text"
 )
 
 const (
@@ -22,6 +24,29 @@ const (
 	COMMAND_MODE_OPTION  CommandMode = iota // Option command, eg: go run main.go -COMMAND
 	COMMAND_MODE_SUB_CMD                    // Sub command, eg: go run main.go SUB_COMMAND
 )
+
+type Command struct {
+	Name  string
+	usage string
+}
+
+func NewCommand(name, usage string) *Command {
+	return &Command{name, usage}
+}
+
+func (c *Command) Usage() string {
+	return c.Name + "    " + c.usage
+}
+
+func formatCommandUsage(cmds []*Command) string {
+	usages := make([]string, 0, len(cmds))
+	for _, cmd := range cmds {
+		usages = append(usages, cmd.Usage())
+	}
+
+	align := text.NewAlignment("    ", "  ")
+	return align.FormatLines(usages)
+}
 
 func runCommand(e *EFlag, v interface{}, subCommandName string) error {
 	if !isStructPtr(v) {
