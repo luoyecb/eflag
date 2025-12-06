@@ -61,6 +61,7 @@ func main() {
 	// eflag.RunCommand(cmdOpt)
 
 	flag := eflag.NewEFlag(eflag.COMMAND_MODE_SUB_CMD)
+	// flag := eflag.NewEFlag(eflag.COMMAND_MODE_OPTION)
 	flag.ParseAndRunCommand(cmdOpt)
 	fmt.Printf("%+v\n", cmdOpt)
 }

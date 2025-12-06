@@ -29,13 +29,12 @@ func ParseAndRunCommand(v interface{}) error {
 type EFlag struct {
 	flagSet *flag.FlagSet
 	config  *Config
-	input   interface{}
 
 	errOutput strings.Builder
 
-	commandMode    CommandMode
-	subCommandName string
-	subCommandList []*Command
+	commandMode CommandMode
+	commandName string
+	commandList []*Command
 }
 
 // NewEFlag is the constructor of EFlag.
@@ -46,12 +45,15 @@ func NewEFlag(commandMode CommandMode, options ...EFlagOption) *EFlag {
 	}
 
 	eFlag := &EFlag{
-		flagSet:     flag.NewFlagSet(os.Args[0], flag.ExitOnError),
 		config:      &config,
 		commandMode: commandMode,
 	}
-	eFlag.flagSet.Usage = eFlag.Usage
-	eFlag.flagSet.SetOutput(&eFlag.errOutput)
+
+	flagSet := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+	flagSet.Usage = eFlag.Usage
+	flagSet.SetOutput(&eFlag.errOutput)
+
+	eFlag.flagSet = flagSet
 	return eFlag
 }
 
@@ -64,9 +66,7 @@ func (e *EFlag) Parse(v interface{}) error {
 		return errors.New("Must be a pointer to a struct type")
 	}
 
-	e.input = v
 	ReflectVisitStructField(v, true, e.parse)
-
 	err := e.flagSet.Parse(e.checkCommandMode(true))
 	if err == nil {
 		e.setArgs(v)
@@ -74,39 +74,28 @@ func (e *EFlag) Parse(v interface{}) error {
 	return err
 }
 
-func (e *EFlag) collectSubCommand(field reflect.StructField) {
-	if e.commandMode == COMMAND_MODE_SUB_CMD {
-		tagStr, ok := field.Tag.Lookup(COMMAND_SUB_COMMAND_TAG_KEY)
-		if ok && tagStr != "" {
-			usage := field.Tag.Get("usage")
-			e.subCommandList = append(e.subCommandList, NewCommand(tagStr, usage))
-		}
-	}
+func (e *EFlag) isMode(mode CommandMode) bool {
+	return e.commandMode == mode
 }
 
 func (e *EFlag) checkCommandMode(exitOnError bool) (args []string) {
-	if e.commandMode == COMMAND_MODE_SUB_CMD {
-		isErr := true
-		if len(os.Args) > SUM_COMMAND_INDEX {
-			if name := os.Args[SUM_COMMAND_INDEX]; name[0] != '-' {
-				isErr = false
-				e.subCommandName = name
-				args = os.Args[SUM_COMMAND_INDEX+1:]
-			}
-		}
-		if isErr && exitOnError {
+	if e.isMode(COMMAND_MODE_OPTION) {
+		return os.Args[1:]
+	} else if e.isMode(COMMAND_MODE_SUB_CMD) && len(os.Args) > SUM_COMMAND_INDEX {
+		if name := os.Args[SUM_COMMAND_INDEX]; name[0] != '-' {
+			e.commandName = name
+			return os.Args[SUM_COMMAND_INDEX+1:]
+		} else if exitOnError {
 			fmt.Fprintf(os.Stderr, "Not valid sub command format\n")
 			os.Exit(1)
 		}
-	} else if e.commandMode == COMMAND_MODE_OPTION {
-		args = os.Args[1:]
 	}
 	return
 }
 
 func (e *EFlag) parse(rv reflect.Value, field reflect.StructField, fieldValue reflect.Value) (ret bool) {
-	e.collectSubCommand(field)
-
+	e.parseCommand(rv, field, fieldValue)
+	// parse flag
 	tagName := field.Tag.Get(e.config.TagName)
 	if tagName == "" {
 		return
@@ -116,13 +105,46 @@ func (e *EFlag) parse(rv reflect.Value, field reflect.StructField, fieldValue re
 	usage := field.Tag.Get("usage")
 	e.flagSet.Var(val, tagName, usage)
 
-	// parse short tag
+	// parse short flag
 	tagNameShort := field.Tag.Get(e.config.TagNameShort)
 	if tagNameShort != "" {
 		cval := val
 		e.flagSet.Var(cval, tagNameShort, fmt.Sprintf("%s(same as %s)", usage, tagName))
 	}
 	return
+}
+
+func (e *EFlag) parseCommand(rv reflect.Value, field reflect.StructField, fieldValue reflect.Value) {
+	if e.isMode(COMMAND_MODE_SUB_CMD) {
+		// parse sub command
+		tagStr := field.Tag.Get(COMMAND_SUB_COMMAND_TAG_KEY)
+		if tagStr == "" {
+			return
+		}
+		e.commandList = append(e.commandList, &Command{
+			Name:       tagStr,
+			MethodName: field.Name,
+			Mode:       COMMAND_MODE_SUB_CMD,
+			Usage:      field.Tag.Get("usage"),
+			rv:         rv,
+		})
+	} else if e.isMode(COMMAND_MODE_OPTION) {
+		// parse option command
+		cmdStr, ok := field.Tag.Lookup(COMMAND_FIELD_TAG_KEY)
+		if !ok || !isReflectType(field.Type, reflect.Bool, reflect.String) {
+			return
+		}
+		methodName, runFlag := parseCommand(cmdStr, field.Type.Kind(), field.Name)
+		e.commandList = append(e.commandList, &Command{
+			Name:       methodName,
+			MethodName: methodName,
+			Mode:       COMMAND_MODE_OPTION,
+			Usage:      field.Tag.Get("usage"),
+			runFlag:    runFlag,
+			value:      fieldValue,
+			rv:         rv,
+		})
+	}
 }
 
 func (e *EFlag) parseDefault(rv reflect.Value, field reflect.StructField, fieldValue reflect.Value) flag.Value {
@@ -159,15 +181,29 @@ func (e *EFlag) setArgs(v interface{}) {
 	}
 }
 
-func (e *EFlag) RunCommand() error {
-	return runCommand(e, e.input, e.subCommandName)
+func (e *EFlag) RunCommand() {
+	var currentCommand *Command
+	for _, cmd := range e.commandList {
+		if cmd.ShouldRun(e.commandName) {
+			currentCommand = cmd
+			break
+		}
+	}
+	if currentCommand != nil {
+		currentCommand.Run()
+	} else if e.isMode(COMMAND_MODE_SUB_CMD) {
+		fmt.Fprintf(os.Stderr, "Not support sub command\n")
+		e.Usage()
+		os.Exit(1)
+	}
 }
 
 func (e *EFlag) ParseAndRunCommand(v interface{}) error {
-	if err := e.Parse(v); err != nil {
-		return err
+	err := e.Parse(v)
+	if err == nil {
+		e.RunCommand()
 	}
-	return e.RunCommand()
+	return err
 }
 
 func (e *EFlag) Usage() {
@@ -176,10 +212,10 @@ func (e *EFlag) Usage() {
 		e.errOutput.WriteByte('\n')
 	}
 	e.errOutput.WriteString(fmt.Sprintf("Usage of %s:\n", binName))
-	if e.commandMode == COMMAND_MODE_SUB_CMD && len(e.subCommandList) > 0 {
+	if e.isMode(COMMAND_MODE_SUB_CMD) && len(e.commandList) > 0 {
 		e.errOutput.WriteString(fmt.Sprintf("%s {SUB_COMMAND} {OPTION}\n", binName))
 		e.errOutput.WriteString("SUB_COMMAND is\n")
-		e.errOutput.WriteString(formatCommandUsage(e.subCommandList))
+		e.errOutput.WriteString(formatCommandUsage(e.commandList))
 		e.errOutput.WriteString("\nOPTION is\n")
 	}
 	e.flagSet.PrintDefaults()
